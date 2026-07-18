@@ -60,3 +60,96 @@ To compile and optimize the client-side single-page application into the `dist/`
 ```bash
 npm run build
 ```
+
+---
+
+## Backend — FastAPI Pipeline (New)
+
+The real backend replaces the React prototype's simulation with live NVIDIA NIM generation and Backblaze B2 storage. It lives in `backend/`.
+
+### Stack
+
+| Layer | Technology |
+|---|---|
+| API server | FastAPI + Uvicorn |
+| LLM inference | NVIDIA NIM via OpenAI-compatible client (`openai`) |
+| Storage / provenance | Backblaze B2 via `genblaze-s3` + `boto3` |
+| Schema validation | Pydantic v2 |
+
+### Pipeline
+
+```
+POST /api/generate  { topic }
+  → NVIDIA NIM (llama-3.3-70b-instruct)
+  → JSON schema validation (Pydantic) + retry loop (up to 3×)
+  → Store explainer JSON + provenance manifest to B2
+  → Return Explainer with b2_url + manifest_url
+
+GET  /api/library   → List all explainers from B2
+GET  /api/explainer/{id}  → Fetch one by run_id
+```
+
+### Backend Setup
+
+**Prerequisites**: Python 3.11+
+
+```bash
+cd backend
+
+# 1. Copy and fill in your credentials
+cp .env.example .env
+#    Edit .env — add NVIDIA_API_KEY, B2_KEY_ID, B2_APP_KEY, B2_BUCKET_NAME, B2_ENDPOINT_URL
+
+# 2. Create a virtual environment
+python -m venv .venv
+.venv\Scripts\activate        # Windows
+# source .venv/bin/activate   # macOS/Linux
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Start the server
+uvicorn main:app --reload --port 8000
+```
+
+API docs available at **http://localhost:8000/docs** (Swagger UI).
+
+### Frontend Setup
+
+The frontend is two self-contained HTML files — no build step, no framework.
+
+```bash
+# Option A: Open directly in browser
+start frontend/index.html
+
+# Option B: Serve with Python (avoids file:// CORS quirks on some browsers)
+python -m http.server 3001 --directory frontend
+# Then open http://localhost:3001
+```
+
+> **Note**: The FastAPI server must be running on `http://localhost:8000` for the frontend to work.
+
+### Environment Variables (backend/.env)
+
+| Variable | Description |
+|---|---|
+| `NVIDIA_API_KEY` | NVIDIA NIM API key from [build.nvidia.com](https://build.nvidia.com/) |
+| `NVIDIA_BASE_URL` | NIM endpoint (default: `https://integrate.api.nvidia.com/v1`) |
+| `NVIDIA_MODEL` | Model to use (default: `meta/llama-3.3-70b-instruct`) |
+| `B2_KEY_ID` | Backblaze B2 application key ID |
+| `B2_APP_KEY` | Backblaze B2 application key secret |
+| `B2_BUCKET_NAME` | B2 bucket name (must exist) |
+| `B2_ENDPOINT_URL` | B2 S3-compatible endpoint URL |
+| `MAX_RETRIES` | LLM retry attempts on schema failure (default: `3`) |
+| `TARGET_STEPS` | Number of slides to generate (default: `4`) |
+| `ENVIRONMENT` | `development` enables CORS wildcard + verbose errors |
+
+---
+
+## Hackathon
+
+Built for the **Backblaze Generative Media Hackathon** (Build with Genblaze on B2) — deadline August 4, 2026.
+
+- **Genblaze tooling**: `genblaze-core`, `genblaze-s3`, `genblaze-nvidia`
+- **Storage**: Backblaze B2 with provenance manifests per generation
+- **Model**: NVIDIA NIM (NVIDIA-hosted, OpenAI-compatible endpoint)
