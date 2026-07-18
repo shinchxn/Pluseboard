@@ -61,6 +61,7 @@ class Explainer(BaseModel):
     steps_count: int
     b2_url: str | None = Field(None, description="Durable B2 URL for the stored JSON.")
     manifest_url: str | None = Field(None, description="Provenance manifest B2 URL.")
+    html_url: str | None = Field(None, description="B2 URL for the animated HTML page.")
     generated_at: datetime
 
 

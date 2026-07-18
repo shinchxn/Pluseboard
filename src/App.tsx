@@ -89,10 +89,23 @@ const MOCK_SAVED_TOPICS: SavedTopic[] = [
   }
 ];
 
+const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+
+interface SlideStep { phase: string; description: string; bullets: string[]; }
+interface Explainer {
+  id: string; topic: string; title: string; category: string;
+  summary: string; steps: SlideStep[]; steps_count: number;
+  b2_url: string | null; manifest_url: string | null; html_url: string | null; generated_at: string;
+}
+interface LibraryApiItem {
+  id: string; topic: string; title: string; category: string;
+  summary: string; steps_count: number; generated_at: string; b2_url: string;
+}
+
 export default function App() {
   const [inputValue, setInputValue] = useState("");
   const [isEmptyLibrary, setIsEmptyLibrary] = useState(false);
-  const [savedTopics, setSavedTopics] = useState<SavedTopic[]>(MOCK_SAVED_TOPICS);
+  const [savedTopics, setSavedTopics] = useState<SavedTopic[]>([]);
   
   // Simulation and interactive states
   const [screenState, setScreenState] = useState<"default" | "loading" | "success">("default");
@@ -100,6 +113,8 @@ export default function App() {
   const [generatedTopic, setGeneratedTopic] = useState("");
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewStep, setPreviewStep] = useState(0);
+  const [generatedExplainer, setGeneratedExplainer] = useState<Explainer | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   // States to facilitate a rich simulation demo
   const loadingMessages = [
@@ -109,51 +124,102 @@ export default function App() {
     { text: "Optimizing typography & layout contrasts for classroom projectors...", duration: 700 }
   ];
 
-  // Handler for loading simulation
-  const handleGenerate = (topicText: string) => {
+  // Real API integration for generation
+  const handleGenerate = async (topicText: string) => {
     if (!topicText.trim()) return;
     setGeneratedTopic(topicText);
     setScreenState("loading");
     setLoadingStep(0);
+    setApiError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: topicText }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail ?? "Generation failed");
+      }
+      const data = await res.json();
+      const explainer: Explainer = data.explainer;
+      setGeneratedExplainer(explainer);
+      setScreenState("success");
+      setPreviewStep(0);
+      setShowPreviewModal(true);
+      // Add to library list
+      setSavedTopics(prev => [{
+        id: explainer.id, title: explainer.title,
+        category: explainer.category as SavedTopic["category"],
+        lastUsed: "Just now", stepsCount: explainer.steps_count,
+        iconType: explainer.category === "database" ? "database"
+                : explainer.category === "operating-systems" ? "cpu"
+                : explainer.category === "algorithms" ? "algorithm" : "network",
+      }, ...prev]);
+    } catch (err: unknown) {
+      setApiError(err instanceof Error ? err.message : String(err));
+      setScreenState("default");
+    }
   };
 
-  // Run the loading step simulation
+  const handleLoadExplainer = async (id: string, fallbackTitle: string) => {
+    setScreenState("loading");
+    setApiError(null);
+    setGeneratedTopic(fallbackTitle);
+    try {
+      const res = await fetch(`${API_BASE}/api/explainer/${id}`);
+      if (!res.ok) {
+        // If not real backend ID, just mock it
+        setScreenState("success");
+        setPreviewStep(0);
+        setShowPreviewModal(true);
+        return;
+      }
+      const data = await res.json();
+      setGeneratedExplainer(data.explainer);
+      setGeneratedTopic(data.explainer.title);
+      setScreenState("success");
+      setPreviewStep(0);
+      setShowPreviewModal(true);
+    } catch (err: unknown) {
+      setApiError(err instanceof Error ? err.message : String(err));
+      setScreenState("default");
+    }
+  };
+
+  // Run the loading step animation for visual feedback while fetching
   useEffect(() => {
     if (screenState !== "loading") return;
 
-    if (loadingStep < loadingMessages.length) {
+    if (loadingStep < loadingMessages.length - 1) {
       const timer = setTimeout(() => {
         setLoadingStep(prev => prev + 1);
       }, loadingMessages[loadingStep].duration);
       return () => clearTimeout(timer);
-    } else {
-      // Finished loading, transition to success state
-      const timer = setTimeout(() => {
-        setScreenState("success");
-        
-        // Add generated topic to saved topics list if it doesn't already exist
-        const exists = savedTopics.some(t => t.title.toLowerCase() === generatedTopic.toLowerCase());
-        if (!exists) {
-          const category: SavedTopic["category"] = 
-            generatedTopic.toLowerCase().includes("database") || generatedTopic.toLowerCase().includes("sql") ? "database" :
-            generatedTopic.toLowerCase().includes("cpu") || generatedTopic.toLowerCase().includes("operating") ? "operating-systems" :
-            generatedTopic.toLowerCase().includes("alg") || generatedTopic.toLowerCase().includes("search") || generatedTopic.toLowerCase().includes("dijkstra") ? "algorithms" :
-            "networking";
-
-          const newSaved: SavedTopic = {
-            id: String(Date.now()),
-            title: generatedTopic,
-            category,
-            lastUsed: "Just now",
-            stepsCount: Math.floor(Math.random() * 3) + 4,
-            iconType: category === "database" ? "database" : category === "operating-systems" ? "cpu" : category === "algorithms" ? "algorithm" : "network"
-          };
-          setSavedTopics(prev => [newSaved, ...prev]);
-        }
-      }, 500);
-      return () => clearTimeout(timer);
     }
-  }, [screenState, loadingStep, generatedTopic, savedTopics]);
+  }, [screenState, loadingStep]);
+
+  // Fetch library from B2 on mount
+  useEffect(() => {
+    fetch(`${API_BASE}/api/library`)
+      .then(r => r.json())
+      .then((data: { items: LibraryApiItem[] }) => {
+        if (data.items && data.items.length > 0) {
+            setSavedTopics(data.items.map(item => ({
+            id: item.id, title: item.title,
+            category: item.category as SavedTopic["category"],
+            lastUsed: new Date(item.generated_at).toLocaleDateString(),
+            stepsCount: item.steps_count,
+            iconType: item.category === "database" ? "database"
+                    : item.category === "operating-systems" ? "cpu"
+                    : item.category === "algorithms" ? "algorithm" : "network",
+            })));
+        } else {
+            setIsEmptyLibrary(true);
+        }
+      })
+      .catch(e => console.warn("Library fetch failed:", e));
+  }, []);
 
   // Choose appropriate icon for cards
   const renderCardIcon = (iconType: SavedTopic["iconType"]) => {
@@ -225,7 +291,12 @@ export default function App() {
     ];
   };
 
-  const slides = getMockPresentationSlides(generatedTopic || "Selected Topic");
+  // Use real LLM output if available, fall back to mock for items loaded from library
+  const slides = generatedExplainer?.steps.map(s => ({
+    title: s.phase,
+    description: s.description,
+    bullets: s.bullets,
+  })) ?? getMockPresentationSlides(generatedTopic || "Selected Topic");
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col antialiased selection:bg-indigo-100">
@@ -371,7 +442,10 @@ export default function App() {
                       <div className="pt-2">
                         <button 
                           id="empty-load-sample-btn"
-                          onClick={() => setIsEmptyLibrary(false)}
+                          onClick={() => {
+                            setIsEmptyLibrary(false);
+                            setSavedTopics(MOCK_SAVED_TOPICS);
+                          }}
                           className="px-4 py-2 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 font-semibold text-xs rounded-xl transition cursor-pointer"
                         >
                           Load Sample Library
@@ -392,7 +466,7 @@ export default function App() {
                           id={`saved-topic-card-${item.id}`}
                           onClick={() => {
                             setInputValue(item.title);
-                            handleGenerate(item.title);
+                            handleLoadExplainer(item.id, item.title);
                           }}
                           className="group bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-slate-300 transition-all cursor-pointer flex justify-between items-start text-left"
                         >
@@ -448,6 +522,11 @@ export default function App() {
                 transition={{ duration: 0.25 }}
                 className="bg-white rounded-3xl p-8 sm:p-12 shadow-xl shadow-slate-200 border border-slate-100 text-center space-y-8 max-w-2xl mx-auto"
               >
+                {apiError && (
+                  <div className="bg-red-50 text-red-700 p-4 rounded-xl text-sm font-medium border border-red-200 mb-4 text-left">
+                    <span className="font-bold">Error:</span> {apiError}
+                  </div>
+                )}
                 <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
                   {/* Rotating elegant custom circular loader */}
                   <div className="absolute inset-0 border-4 border-slate-100 rounded-full"></div>
@@ -628,117 +707,143 @@ export default function App() {
               </div>
 
               {/* Interactive Presentation Body */}
-              <div className="flex-1 bg-slate-950 p-6 sm:p-8 flex flex-col justify-between text-white overflow-y-auto">
-                
-                {/* Active Slide Visual Layout */}
-                <div className="space-y-6 flex-1 flex flex-col justify-center max-w-3xl mx-auto w-full">
+              {generatedExplainer?.html_url ? (
+                /* ── Animated HTML page from B2 ───────────────────────────── */
+                <div className="flex-1 flex flex-col bg-slate-950">
+                  <iframe
+                    id="animated-explainer-iframe"
+                    src={generatedExplainer.html_url}
+                    title={`Animated explainer: ${generatedTopic}`}
+                    className="flex-1 w-full border-0"
+                    sandbox="allow-scripts allow-same-origin"
+                  />
+                  <div className="bg-slate-900 px-6 py-3 text-slate-400 text-xs flex justify-between items-center border-t border-slate-800 font-mono">
+                    <a
+                      href={generatedExplainer.html_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-indigo-400 hover:text-indigo-300 underline"
+                    >
+                      Open full-screen ↗
+                    </a>
+                    <span className="hidden sm:inline">Spacebar = Next step · ESC = Close</span>
+                  </div>
+                </div>
+              ) : (
+                /* ── Slide-deck fallback (no HTML yet or B2 not configured) ─ */
+                <div className="flex-1 bg-slate-950 p-6 sm:p-8 flex flex-col justify-between text-white overflow-y-auto">
                   
-                  {/* Step indicators */}
-                  <div className="flex items-center gap-2 justify-center">
-                    {slides.map((_, idx) => (
+                  {/* Active Slide Visual Layout */}
+                  <div className="space-y-6 flex-1 flex flex-col justify-center max-w-3xl mx-auto w-full">
+                    
+                    {/* Step indicators */}
+                    <div className="flex items-center gap-2 justify-center">
+                      {slides.map((_, idx) => (
+                        <button
+                          key={idx}
+                          id={`step-indicator-btn-${idx}`}
+                          onClick={() => setPreviewStep(idx)}
+                          className={`h-2.5 rounded-full transition-all cursor-pointer ${
+                            idx === previewStep ? "w-10 bg-indigo-500" : "w-2.5 bg-slate-700 hover:bg-slate-500"
+                          }`}
+                          title={`Go to step ${idx + 1}`}
+                        />
+                      ))}
+                    </div>
+
+                    {/* Active Slide Content */}
+                    <AnimatePresence mode="wait">
+                      <motion.div
+                        key={previewStep}
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        transition={{ duration: 0.25 }}
+                        className="space-y-6 bg-slate-900/60 p-6 sm:p-8 rounded-2xl border border-slate-800"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs sm:text-sm font-bold tracking-widest text-indigo-400 uppercase font-mono">
+                            STEP {previewStep + 1} OF {slides.length}
+                          </span>
+                          <span className="px-2.5 py-0.5 bg-indigo-500/20 text-indigo-300 rounded text-xs font-mono">
+                            Live Active
+                          </span>
+                        </div>
+
+                        <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-100 font-display">
+                          {slides[previewStep].title}
+                        </h3>
+
+                        <p className="text-slate-300 text-base sm:text-lg leading-relaxed">
+                          {slides[previewStep].description}
+                        </p>
+
+                        {/* Dynamic interactive mock bullet visualization list */}
+                        <div className="space-y-2.5 pt-2">
+                          {slides[previewStep].bullets.map((bullet, bIdx) => (
+                            <div key={bIdx} className="flex items-start gap-2.5">
+                              <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0" />
+                              <span className="text-slate-400 text-sm sm:text-base">{bullet}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </motion.div>
+                    </AnimatePresence>
+
+                  </div>
+
+                  {/* Presentation Navigation Controls (Large targets for Touchscreens / Smartboards) */}
+                  <div className="mt-6 pt-6 border-t border-slate-900 flex items-center justify-between gap-4 max-w-3xl mx-auto w-full">
+                    
+                    <button
+                      id="prev-slide-btn"
+                      onClick={() => setPreviewStep(prev => Math.max(0, prev - 1))}
+                      disabled={previewStep === 0}
+                      className={`flex items-center gap-2 py-3 px-5 sm:px-6 rounded-xl font-bold transition-all text-sm sm:text-base cursor-pointer min-h-[48px] ${
+                        previewStep === 0
+                          ? "bg-slate-900 text-slate-600 cursor-not-allowed opacity-50"
+                          : "bg-slate-800 hover:bg-slate-700 text-white"
+                      }`}
+                    >
+                      <ChevronLeft className="w-5 h-5" />
+                      <span>Previous</span>
+                    </button>
+
+                    <div className="text-slate-400 text-xs sm:text-sm font-mono font-bold">
+                      Slide {previewStep + 1} / {slides.length}
+                    </div>
+
+                    {previewStep < slides.length - 1 ? (
                       <button
-                        key={idx}
-                        id={`step-indicator-btn-${idx}`}
-                        onClick={() => setPreviewStep(idx)}
-                        className={`h-2.5 rounded-full transition-all cursor-pointer ${
-                          idx === previewStep ? "w-10 bg-indigo-500" : "w-2.5 bg-slate-700 hover:bg-slate-500"
-                        }`}
-                        title={`Go to step ${idx + 1}`}
-                      />
-                    ))}
+                        id="next-slide-btn"
+                        onClick={() => setPreviewStep(prev => Math.min(slides.length - 1, prev + 1))}
+                        className="flex items-center gap-2 py-3 px-5 sm:px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all text-sm sm:text-base cursor-pointer min-h-[48px]"
+                      >
+                        <span>Next Step</span>
+                        <ChevronRight className="w-5 h-5" />
+                      </button>
+                    ) : (
+                      <button
+                        id="complete-slide-btn"
+                        onClick={() => setShowPreviewModal(false)}
+                        className="flex items-center gap-2 py-3 px-5 sm:px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-all text-sm sm:text-base cursor-pointer min-h-[48px]"
+                      >
+                        <CheckCircle2 className="w-5 h-5" />
+                        <span>Finish Preview</span>
+                      </button>
+                    )}
+
                   </div>
 
-                  {/* Active Slide Content */}
-                  <AnimatePresence mode="wait">
-                    <motion.div
-                      key={previewStep}
-                      initial={{ opacity: 0, x: 20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -20 }}
-                      transition={{ duration: 0.25 }}
-                      className="space-y-6 bg-slate-900/60 p-6 sm:p-8 rounded-2xl border border-slate-800"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs sm:text-sm font-bold tracking-widest text-indigo-400 uppercase font-mono">
-                          STEP {previewStep + 1} OF {slides.length}
-                        </span>
-                        <span className="px-2.5 py-0.5 bg-indigo-500/20 text-indigo-300 rounded text-xs font-mono">
-                          Live Active
-                        </span>
-                      </div>
-
-                      <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-100 font-display">
-                        {slides[previewStep].title}
-                      </h3>
-
-                      <p className="text-slate-300 text-base sm:text-lg leading-relaxed">
-                        {slides[previewStep].description}
-                      </p>
-
-                      {/* Dynamic interactive mock bullet visualization list */}
-                      <div className="space-y-2.5 pt-2">
-                        {slides[previewStep].bullets.map((bullet, bIdx) => (
-                          <div key={bIdx} className="flex items-start gap-2.5">
-                            <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0" />
-                            <span className="text-slate-400 text-sm sm:text-base">{bullet}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </motion.div>
-                  </AnimatePresence>
-
                 </div>
-
-                {/* Presentation Navigation Controls (Large targets for Touchscreens / Smartboards) */}
-                <div className="mt-6 pt-6 border-t border-slate-900 flex items-center justify-between gap-4 max-w-3xl mx-auto w-full">
-                  
-                  <button
-                    id="prev-slide-btn"
-                    onClick={() => setPreviewStep(prev => Math.max(0, prev - 1))}
-                    disabled={previewStep === 0}
-                    className={`flex items-center gap-2 py-3 px-5 sm:px-6 rounded-xl font-bold transition-all text-sm sm:text-base cursor-pointer min-h-[48px] ${
-                      previewStep === 0
-                        ? "bg-slate-900 text-slate-600 cursor-not-allowed opacity-50"
-                        : "bg-slate-800 hover:bg-slate-700 text-white"
-                    }`}
-                  >
-                    <ChevronLeft className="w-5 h-5" />
-                    <span>Previous</span>
-                  </button>
-
-                  <div className="text-slate-400 text-xs sm:text-sm font-mono font-bold">
-                    Slide {previewStep + 1} / {slides.length}
-                  </div>
-
-                  {previewStep < slides.length - 1 ? (
-                    <button
-                      id="next-slide-btn"
-                      onClick={() => setPreviewStep(prev => Math.min(slides.length - 1, prev + 1))}
-                      className="flex items-center gap-2 py-3 px-5 sm:px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all text-sm sm:text-base cursor-pointer min-h-[48px]"
-                    >
-                      <span>Next Step</span>
-                      <ChevronRight className="w-5 h-5" />
-                    </button>
-                  ) : (
-                    <button
-                      id="complete-slide-btn"
-                      onClick={() => setShowPreviewModal(false)}
-                      className="flex items-center gap-2 py-3 px-5 sm:px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-all text-sm sm:text-base cursor-pointer min-h-[48px]"
-                    >
-                      <CheckCircle2 className="w-5 h-5" />
-                      <span>Finish Preview</span>
-                    </button>
-                  )}
-
-                </div>
-
-              </div>
+              )}
 
               {/* Modal Footer Controls info */}
               <div className="bg-slate-900 px-6 py-3 text-slate-400 text-xs flex justify-between items-center border-t border-slate-800 font-mono">
                 <span>Rendering Engine: PulseBoard Visual Core</span>
                 <span className="hidden sm:inline">Press ESC or click outside to dismiss preview</span>
               </div>
+
 
             </motion.div>
           </motion.div>

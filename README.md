@@ -72,8 +72,8 @@ The real backend replaces the React prototype's simulation with live NVIDIA NIM 
 | Layer | Technology |
 |---|---|
 | API server | FastAPI + Uvicorn |
-| LLM inference | NVIDIA NIM via OpenAI-compatible client (`openai`) |
-| Storage / provenance | Backblaze B2 via `genblaze-s3` + `boto3` |
+| LLM inference | NVIDIA NIM via `genblaze-nvidia` |
+| Storage / provenance | Backblaze B2 via `genblaze-s3` |
 | Schema validation | Pydantic v2 |
 
 ### Pipeline
@@ -116,18 +116,18 @@ API docs available at **http://localhost:8000/docs** (Swagger UI).
 
 ### Frontend Setup
 
-The frontend is two self-contained HTML files — no build step, no framework.
+The frontend is a React application built with Vite.
 
 ```bash
-# Option A: Open directly in browser
-start frontend/index.html
+# 1. Install dependencies
+npm install
 
-# Option B: Serve with Python (avoids file:// CORS quirks on some browsers)
-python -m http.server 3001 --directory frontend
-# Then open http://localhost:3001
+# 2. Start the dev server
+npm run dev
+# Open http://localhost:3000
 ```
 
-> **Note**: The FastAPI server must be running on `http://localhost:8000` for the frontend to work.
+> **Note**: The FastAPI server must be running on `http://localhost:8000` for the frontend to work. Set `VITE_API_URL` in root `.env` or `.env.local` if your backend is hosted elsewhere.
 
 ### Environment Variables (backend/.env)
 
@@ -150,6 +150,6 @@ python -m http.server 3001 --directory frontend
 
 Built for the **Backblaze Generative Media Hackathon** (Build with Genblaze on B2) — deadline August 4, 2026.
 
-- **Genblaze tooling**: `genblaze-core`, `genblaze-s3`, `genblaze-nvidia`
-- **Storage**: Backblaze B2 with provenance manifests per generation
-- **Model**: NVIDIA NIM (NVIDIA-hosted, OpenAI-compatible endpoint)
+- **Genblaze tooling**: `genblaze-core`, `genblaze-s3` (for all B2 operations), `genblaze-nvidia` (for structured LLM generation)
+- **Storage**: Backblaze B2 with provenance manifests per generation via `genblaze-s3`
+- **Model**: NVIDIA NIM (`meta/llama-3.3-70b-instruct`) using `genblaze_nvidia`'s schema enforcement.

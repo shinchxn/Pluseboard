@@ -68,8 +68,11 @@ app = FastAPI(
 cors_origins = (
     ["*"]
     if ENVIRONMENT == "development"
-    else [os.getenv("APP_URL", "http://localhost:8000")]
+    else [os.getenv("APP_URL", "")]
 )
+
+if not cors_origins[0]:
+    logger.warning("APP_URL is not set — CORS will reject cross-origin requests in production.")
 
 app.add_middleware(
     CORSMiddleware,
