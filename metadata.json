@@ -1,0 +1,6 @@
+{
+  "name": "PulseBoard",
+  "description": "An interactive classroom smartboard tool that turns technical process-flow topics into visual step-by-step explainers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
