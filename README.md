@@ -80,13 +80,16 @@ The real backend replaces the React prototype's simulation with live NVIDIA NIM 
 
 ```
 POST /api/generate  { topic }
-  → NVIDIA NIM (llama-3.3-70b-instruct)
+  → Tavily API: retrieve relevant research context (if configured)
+  → NVIDIA NIM (script model): generate step-by-step JSON
   → JSON schema validation (Pydantic) + retry loop (up to 3×)
-  → Store explainer JSON + provenance manifest to B2
-  → Return Explainer with b2_url + manifest_url
+  → NVIDIA NIM (HTML model): generate animated HTML / HyperFrames composition
+  → Store explainer JSON + animated HTML + provenance manifest to B2
+  → Return Explainer with b2_url + manifest_url + html_url
 
 GET  /api/library   → List all explainers from B2
 GET  /api/explainer/{id}  → Fetch one by run_id
+GET  /api/config-status   → Debug endpoint for integration health
 ```
 
 ### Backend Setup
@@ -135,14 +138,26 @@ npm run dev
 |---|---|
 | `NVIDIA_API_KEY` | NVIDIA NIM API key from [build.nvidia.com](https://build.nvidia.com/) |
 | `NVIDIA_BASE_URL` | NIM endpoint (default: `https://integrate.api.nvidia.com/v1`) |
-| `NVIDIA_MODEL` | Model to use (default: `meta/llama-3.3-70b-instruct`) |
+| `NVIDIA_MODEL` | Fallback model to use |
+| `PULSEBOARD_SCRIPT_MODEL`| Model for JSON script generation (default: `nvidia/llama-3.3-nemotron-super-49b-v1`) |
+| `PULSEBOARD_HTML_MODEL`| Model for HTML generation (default: `meta/llama-3.3-70b-instruct`) |
 | `B2_KEY_ID` | Backblaze B2 application key ID |
 | `B2_APP_KEY` | Backblaze B2 application key secret |
 | `B2_BUCKET_NAME` | B2 bucket name (must exist) |
 | `B2_ENDPOINT_URL` | B2 S3-compatible endpoint URL |
+| `TAVILY_API_KEY` | Tavily API key for research grounding (optional) |
 | `MAX_RETRIES` | LLM retry attempts on schema failure (default: `3`) |
 | `TARGET_STEPS` | Number of slides to generate (default: `4`) |
+| `ENABLE_COMPOSITION_ENGINE` | Flag to enable HyperFrames generation in the backend (default: `false`) |
 | `ENVIRONMENT` | `development` enables CORS wildcard + verbose errors |
+
+### Frontend Environment Variables (root .env)
+
+| Variable | Description |
+|---|---|
+| `VITE_API_URL` | Deployed backend URL (leave blank for localhost) |
+| `VITE_USE_HYPERFRAMES_PLAYER` | Flag to enable `<hyperframes-player>` in the UI modal (default: `false`) |
+
 
 ---
 
