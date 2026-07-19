@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<!--
+  PulseBoard Composition Block: packet-motion
+  Self-contained. No external dependencies. WAAPI-driven motion.
+
+  Attributes:
+    data-from-x, data-from-y  — start position (px)
+    data-to-x,   data-to-y   — end position (px)
+    data-label                — text on the packet (e.g. "SYN seq=100")
+    data-color                — accent color (e.g. "#7c6fff")
+    data-duration-ms          — animation duration in ms (default 1200)
+
+  API:
+    root.play()   — fire the motion animation from start to end
+    root.reset()  — snap packet back to start without animation
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PulseBoard Block — packet-motion</title>
+  <style>
+    body {
+      margin: 0;
+      background: #0d0d14;
+      min-height: 300px;
+      position: relative;
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Block markup ── -->
+<div class="pb-packet-motion"
+     data-from-x="80"  data-from-y="140"
+     data-to-x="700"   data-to-y="140"
+     data-label="SYN seq=100"
+     data-color="#7c6fff"
+     data-duration-ms="1200">
+
+  <style>
+    .pb-packet-motion {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .pb-packet-motion .pb-wire {
+      position: absolute;
+      height: 2px;
+      background: linear-gradient(90deg, #2a2a4a, #3a3a6a);
+      transform-origin: left center;
+    }
+
+    .pb-packet-motion .pb-packet {
+      position: absolute;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font: 700 13px/1 'JetBrains Mono', 'Fira Mono', monospace;
+      color: #fff;
+      white-space: nowrap;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      pointer-events: none;
+      transform: translateY(-50%);
+    }
+
+    .pb-packet-motion .pb-packet::before {
+      content: "▶";
+      font-size: 9px;
+      opacity: 0.8;
+    }
+  </style>
+
+  <script>
+    (function (root) {
+      const fx = parseFloat(root.dataset.fromX);
+      const fy = parseFloat(root.dataset.fromY);
+      const tx = parseFloat(root.dataset.toX);
+      const ty = parseFloat(root.dataset.toY);
+      const dur = parseInt(root.dataset.durationMs, 10) || 1200;
+      const color = root.dataset.color || "#7c6fff";
+      const label = root.dataset.label || "";
+
+      // Draw wire
+      const wire = document.createElement("div");
+      wire.className = "pb-wire";
+      const dx = tx - fx, dy = ty - fy;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+      wire.style.left = fx + "px";
+      wire.style.top = fy + "px";
+      wire.style.width = len + "px";
+      wire.style.transform = `rotate(${angle}deg)`;
+      root.appendChild(wire);
+
+      // Build packet element
+      const pkt = document.createElement("div");
+      pkt.className = "pb-packet";
+      pkt.textContent = label;
+      pkt.style.background = color;
+      pkt.style.left = fx + "px";
+      pkt.style.top = fy + "px";
+      root.appendChild(pkt);
+
+      let currentAnim = null;
+
+      root.play = function () {
+        if (currentAnim) { currentAnim.cancel(); }
+        currentAnim = pkt.animate(
+          [
+            { left: fx + "px", top: fy + "px", opacity: 1, offset: 0 },
+            { left: (fx + dx * 0.5) + "px", top: (fy + dy * 0.5 - 8) + "px", opacity: 1, offset: 0.5 },
+            { left: tx + "px", top: ty + "px", opacity: 1, offset: 1 },
+          ],
+          {
+            duration: dur,
+            easing: "cubic-bezier(.4,0,.2,1)",
+            fill: "forwards",
+          }
+        );
+        return currentAnim;
+      };
+
+      root.reset = function () {
+        if (currentAnim) { currentAnim.cancel(); currentAnim = null; }
+        pkt.style.left = fx + "px";
+        pkt.style.top = fy + "px";
+      };
+
+    })(document.currentScript.closest(".pb-packet-motion"));
+  </script>
+</div>
+
+<!-- Demo: auto-play on load -->
+<script>
+  window.addEventListener("DOMContentLoaded", () => {
+    const block = document.querySelector(".pb-packet-motion");
+    if (block && block.play) {
+      setTimeout(() => block.play(), 500);
+    }
+  });
+</script>
+
+</body>
+</html>

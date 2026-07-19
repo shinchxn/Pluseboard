@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   Layers, 
   Network, 
@@ -24,6 +24,14 @@ import {
   GraduationCap
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import "@hyperframes/player"; // registers <hyperframes-player> custom element
+
+
+// Part 3: HyperFrames player feature flag (flip VITE_USE_HYPERFRAMES_PLAYER=true
+// in .env only after ENABLE_COMPOSITION_ENGINE=true is verified on the backend).
+const USE_HYPERFRAMES_PLAYER =
+  import.meta.env.VITE_USE_HYPERFRAMES_PLAYER === "true";
+
 
 // Types for Saved Topics
 interface SavedTopic {
@@ -115,6 +123,9 @@ export default function App() {
   const [previewStep, setPreviewStep] = useState(0);
   const [generatedExplainer, setGeneratedExplainer] = useState<Explainer | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+
+  // Part 3: ref to the <hyperframes-player> custom element for seek/pause control
+  const hyperframesPlayerRef = useRef<HTMLElement | null>(null);
 
   // States to facilitate a rich simulation demo
   const loadingMessages = [
@@ -708,27 +719,51 @@ export default function App() {
 
               {/* Interactive Presentation Body */}
               {generatedExplainer?.html_url ? (
-                /* ── Animated HTML page from B2 ───────────────────────────── */
-                <div className="flex-1 flex flex-col bg-slate-950">
-                  <iframe
-                    id="animated-explainer-iframe"
-                    src={generatedExplainer.html_url}
-                    title={`Animated explainer: ${generatedTopic}`}
-                    className="flex-1 w-full border-0"
-                    sandbox="allow-scripts allow-same-origin"
-                  />
-                  <div className="bg-slate-900 px-6 py-3 text-slate-400 text-xs flex justify-between items-center border-t border-slate-800 font-mono">
-                    <a
-                      href={generatedExplainer.html_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-indigo-400 hover:text-indigo-300 underline"
-                    >
-                      Open full-screen ↗
-                    </a>
-                    <span className="hidden sm:inline">Spacebar = Next step · ESC = Close</span>
+                USE_HYPERFRAMES_PLAYER ? (
+                  /* ── Part 3: HyperFrames player (VITE_USE_HYPERFRAMES_PLAYER=true) ── */
+                  <div className="flex-1 flex flex-col bg-slate-950">
+                    <hyperframes-player
+                      id="hyperframes-explainer-player"
+                      ref={hyperframesPlayerRef as React.RefObject<HTMLElement>}
+                      src={generatedExplainer.html_url}
+                      controls
+                      className="flex-1 w-full border-0 block"
+                    />
+                    <div className="bg-slate-900 px-6 py-3 text-slate-400 text-xs flex justify-between items-center border-t border-slate-800 font-mono">
+                      <a
+                        href={generatedExplainer.html_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-indigo-400 hover:text-indigo-300 underline"
+                      >
+                        Open full-screen ↗
+                      </a>
+                      <span className="hidden sm:inline">HyperFrames · Spacebar = Next · ESC = Close</span>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  /* ── Existing path: Animated HTML page from B2 via iframe ── */
+                  <div className="flex-1 flex flex-col bg-slate-950">
+                    <iframe
+                      id="animated-explainer-iframe"
+                      src={generatedExplainer.html_url}
+                      title={`Animated explainer: ${generatedTopic}`}
+                      className="flex-1 w-full border-0"
+                      sandbox="allow-scripts allow-same-origin"
+                    />
+                    <div className="bg-slate-900 px-6 py-3 text-slate-400 text-xs flex justify-between items-center border-t border-slate-800 font-mono">
+                      <a
+                        href={generatedExplainer.html_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-indigo-400 hover:text-indigo-300 underline"
+                      >
+                        Open full-screen ↗
+                      </a>
+                      <span className="hidden sm:inline">Spacebar = Next step · ESC = Close</span>
+                    </div>
+                  </div>
+                )
               ) : (
                 /* ── Slide-deck fallback (no HTML yet or B2 not configured) ─ */
                 <div className="flex-1 bg-slate-950 p-6 sm:p-8 flex flex-col justify-between text-white overflow-y-auto">
@@ -797,7 +832,17 @@ export default function App() {
                     
                     <button
                       id="prev-slide-btn"
-                      onClick={() => setPreviewStep(prev => Math.max(0, prev - 1))}
+                      onClick={() => {
+                        const next = Math.max(0, previewStep - 1);
+                        setPreviewStep(next);
+                        // Part 3: seek player if active
+                        if (USE_HYPERFRAMES_PLAYER && hyperframesPlayerRef.current) {
+                          const player = hyperframesPlayerRef.current as HTMLElement & { seek?: (t: number) => void; pause?: () => void };
+                          const secondsPerStep = 5;
+                          player.seek?.(next * secondsPerStep);
+                          player.pause?.();
+                        }
+                      }}
                       disabled={previewStep === 0}
                       className={`flex items-center gap-2 py-3 px-5 sm:px-6 rounded-xl font-bold transition-all text-sm sm:text-base cursor-pointer min-h-[48px] ${
                         previewStep === 0
@@ -816,7 +861,17 @@ export default function App() {
                     {previewStep < slides.length - 1 ? (
                       <button
                         id="next-slide-btn"
-                        onClick={() => setPreviewStep(prev => Math.min(slides.length - 1, prev + 1))}
+                        onClick={() => {
+                          const next = Math.min(slides.length - 1, previewStep + 1);
+                          setPreviewStep(next);
+                          // Part 3: seek player if active
+                          if (USE_HYPERFRAMES_PLAYER && hyperframesPlayerRef.current) {
+                            const player = hyperframesPlayerRef.current as HTMLElement & { seek?: (t: number) => void; pause?: () => void };
+                            const secondsPerStep = 5;
+                            player.seek?.(next * secondsPerStep);
+                            player.pause?.();
+                          }
+                        }}
                         className="flex items-center gap-2 py-3 px-5 sm:px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all text-sm sm:text-base cursor-pointer min-h-[48px]"
                       >
                         <span>Next Step</span>

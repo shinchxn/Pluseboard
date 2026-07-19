@@ -63,6 +63,12 @@ class Explainer(BaseModel):
     manifest_url: str | None = Field(None, description="Provenance manifest B2 URL.")
     html_url: str | None = Field(None, description="B2 URL for the animated HTML page.")
     generated_at: datetime
+    # Part 1 — diagnostic fields
+    storage_configured: bool = Field(False, description="True if B2 was configured at generation time.")
+    html_generation_failed: bool = Field(False, description="True if the HTML model failed both attempts.")
+    # Part 2 — Tavily research provenance
+    research_used: bool = Field(False, description="True if Tavily grounding was applied.")
+    research_sources: list[str] = Field(default_factory=list, description="Source URLs from Tavily.")
 
 
 class LibraryItem(BaseModel):

@@ -41,9 +41,13 @@ B2_BUCKET_NAME = os.getenv("B2_BUCKET_NAME", "pulseboard-explainers")
 B2_ENDPOINT_URL = os.getenv("B2_ENDPOINT_URL", "")
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
 TARGET_STEPS = int(os.getenv("TARGET_STEPS", "4"))
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+
+# Part 0 — Composition engine feature flag (default: off)
+USE_COMPOSITION_ENGINE = os.getenv("ENABLE_COMPOSITION_ENGINE", "false").lower() == "true"
 
 
-# ── Prompt template ───────────────────────────────────────────────────────────
+# ── Prompt templates ──────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """\
 You are an expert academic curriculum designer and technical illustrator.
 Your job is to produce concise, high-contrast visual explainer content for
@@ -131,6 +135,115 @@ Respond with ONLY the raw HTML document, starting with <!DOCTYPE html>.
 No markdown fences, no commentary before or after.
 """
 
+# HyperFrames composition contract addendum (appended when USE_COMPOSITION_ENGINE=True)
+HYPERFRAMES_SYSTEM_PROMPT_ADDENDUM = """\
+
+## HyperFrames Composition Structure
+
+Structure the output as a HyperFrames composition: the root element needs
+`data-composition-id="pulseboard-explainer"`, `data-width="1920"`,
+`data-height="1080"`. Each step is a `<div class="clip" data-start="{N}"
+data-duration="{D}">` positioned sequentially on the timeline. Use the
+`packet-motion`, `phase-caption`, and `progress-dots` block patterns
+provided below for each step's content — assemble from these rather than
+inventing new animation code. Use `element.animate()` (WAAPI) for any
+motion, never raw CSS transitions, so playback stays frame-accurate when
+seeked externally.
+
+### Block: progress-dots
+```html
+<div class="pb-progress-dots" data-step-count="4" data-current-step="0">
+  <style>
+    .pb-progress-dots { display: flex; gap: 8px; }
+    .pb-progress-dots .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #3a3a4a;
+    }
+    .pb-progress-dots .dot.active { background: #7c6fff; }
+  </style>
+  <script>
+    (function (root) {
+      const count = parseInt(root.dataset.stepCount, 10);
+      root.innerHTML += Array.from({ length: count })
+        .map((_, i) => `<div class="dot" data-index="${i}"></div>`)
+        .join("");
+      root.setActiveStep = function (i) {
+        root.querySelectorAll(".dot").forEach((d, idx) =>
+          d.classList.toggle("active", idx === i)
+        );
+      };
+      root.setActiveStep(parseInt(root.dataset.currentStep, 10) || 0);
+    })(document.currentScript.closest(".pb-progress-dots"));
+  </script>
+</div>
+```
+
+### Block: packet-motion
+```html
+<div class="pb-packet-motion"
+     data-from-x="100" data-from-y="200"
+     data-to-x="800"   data-to-y="200"
+     data-label="SYN seq=100"
+     data-color="#7c6fff"
+     data-duration-ms="1200">
+  <style>
+    .pb-packet-motion .packet {
+      position: absolute;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font: 700 13px/1 monospace;
+      color: #fff;
+      pointer-events: none;
+    }
+  </style>
+  <script>
+    (function (root) {
+      const p = document.createElement("div");
+      p.className = "packet";
+      p.textContent = root.dataset.label;
+      p.style.background = root.dataset.color;
+      const fx = parseFloat(root.dataset.fromX), fy = parseFloat(root.dataset.fromY);
+      const tx = parseFloat(root.dataset.toX),   ty = parseFloat(root.dataset.toY);
+      const dur = parseInt(root.dataset.durationMs, 10) || 1200;
+      p.style.left = fx + "px"; p.style.top = fy + "px";
+      root.appendChild(p);
+      root.play = function () {
+        p.animate(
+          [{ transform: `translate(0,0)` }, { transform: `translate(${tx - fx}px,${ty - fy}px)` }],
+          { duration: dur, easing: "cubic-bezier(.4,0,.2,1)", fill: "forwards" }
+        );
+      };
+    })(document.currentScript.closest(".pb-packet-motion"));
+  </script>
+</div>
+```
+
+### Block: phase-caption
+```html
+<div class="pb-phase-caption"
+     data-phase="Phase 1: SYN"
+     data-color="#7c6fff"
+     data-description="Client sends SYN to initiate connection."
+     data-fields="seq=100 | ack=0 | flags=SYN">
+  <style>
+    .pb-phase-caption { padding: 16px 24px; border-radius: 12px; background: #13131a; }
+    .pb-phase-caption .tag { display:inline-block; padding:3px 10px; border-radius:20px;
+      font:700 11px/1 monospace; color:#fff; margin-bottom:8px; }
+    .pb-phase-caption .desc { color:#c8c8d8; font-size:15px; line-height:1.5; }
+    .pb-phase-caption .fields { margin-top:6px; color:#7c6fff; font:600 12px/1 monospace; }
+  </style>
+  <script>
+    (function (root) {
+      root.innerHTML = `
+        <span class="tag" style="background:${root.dataset.color}">${root.dataset.phase}</span>
+        <div class="desc">${root.dataset.description}</div>
+        <div class="fields">${root.dataset.fields || ""}</div>`;
+    })(document.currentScript.closest(".pb-phase-caption"));
+  </script>
+</div>
+```
+"""
+
 
 def _build_html_user_prompt(topic: str, script_json: str) -> str:
     return f"""Topic: {topic}
@@ -143,9 +256,20 @@ instructions exactly. Decide what the PARTICIPANTS and MOVING ELEMENT
 represent for this specific topic before writing any code."""
 
 
-def _build_user_prompt(topic: str, target_steps: int = TARGET_STEPS) -> str:
+def _build_user_prompt(topic: str, target_steps: int = TARGET_STEPS, research_context: str = "") -> str:
+    grounding_block = ""
+    if research_context:
+        grounding_block = f"""
+## Retrieved research context (prefer these specific facts over general knowledge)
+
+{research_context}
+
+Use the above retrieved facts where relevant, but write the steps in your
+own words — do not reproduce source text verbatim.
+
+"""
     return f"""
-Generate a structured visual explainer for the following academic/technical topic:
+{grounding_block}Generate a structured visual explainer for the following academic/technical topic:
 
 TOPIC: "{topic}"
 
@@ -201,10 +325,10 @@ def _get_storage_backend():
         return None
     try:
         from genblaze_s3 import S3StorageBackend  # type: ignore
-        
+
         # Extract region from endpoint URL (e.g. https://s3.us-west-004.backblazeb2.com -> us-west-004)
         region_str = B2_ENDPOINT_URL.replace("https://s3.", "").replace(".backblazeb2.com", "") if B2_ENDPOINT_URL else "us-west-004"
-        
+
         return S3StorageBackend.for_backblaze(
             bucket=B2_BUCKET_NAME,
             key_id=B2_KEY_ID,
@@ -245,6 +369,9 @@ def _upload_to_b2(
         "generated_at": payload.get("generated_at", ""),
         "explainer_key": explainer_key,
         "html_key": html_key if html_content else None,
+        # Part 2 — research provenance
+        "research_provider": "tavily" if payload.get("research_sources") else None,
+        "research_sources": payload.get("research_sources", []),
     }
 
     base = B2_ENDPOINT_URL.rstrip("/")
@@ -310,7 +437,7 @@ def _list_b2_explainers() -> list[dict[str, Any]]:
                 # Key format: explainers/{slug}/{run_id}.json
                 parts = key.split("/")
                 run_id = parts[-1].replace(".json", "") if len(parts) >= 3 else key
-                
+
                 items.append({
                     "id": run_id,
                     "topic": data.get("topic", ""),
@@ -345,7 +472,7 @@ def _fetch_b2_explainer(explainer_id: str) -> dict[str, Any] | None:
             if explainer_id in key:
                 target_key = key
                 break
-                
+
         if not target_key:
             return None
 
@@ -367,12 +494,57 @@ def _slugify(text: str) -> str:
     return text[:60]
 
 
+# ── Research grounding (Part 2) ───────────────────────────────────────────────
+def _research_topic(topic: str) -> tuple[str, list[str]]:
+    """
+    Search the web for the topic via Tavily → (context_block, source_urls).
+    Returns ("", []) if TAVILY_API_KEY is unset or the search fails — the
+    pipeline keeps working without grounding, just less accurately.
+    """
+    if not TAVILY_API_KEY:
+        logger.info("TAVILY_API_KEY not set — skipping research step.")
+        return "", []
+
+    try:
+        from tavily import TavilyClient  # type: ignore
+        client = TavilyClient(api_key=TAVILY_API_KEY)
+        response = client.search(
+            query=f"{topic} explained step by step technical",
+            search_depth="advanced",
+            max_results=5,
+            include_answer=True,
+        )
+        results = response.get("results", [])
+        if not results:
+            return "", []
+
+        context_lines = []
+        sources = []
+        if response.get("answer"):
+            context_lines.append(f"Summary: {response['answer']}")
+        for r in results:
+            title = r.get("title", "")
+            content = (r.get("content", "") or "")[:600]
+            url = r.get("url", "")
+            context_lines.append(f"- {title}: {content}")
+            if url:
+                sources.append(url)
+
+        context_block = "\n".join(context_lines)
+        logger.info("Research found %d sources for topic=%r", len(sources), topic)
+        return context_block, sources
+
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Tavily research failed, continuing without grounding: %s", exc)
+        return "", []
+
+
 # ── HTML generation ────────────────────────────────────────────────────────────
 def _generate_html(client, topic: str, script: LLMExplainerOutput) -> str | None:
     """
     Second LLM pass: given the validated script, ask the HTML model to produce
     a single self-contained animated HTML explainer page.
-    Returns the raw HTML string, or None on failure.
+    Returns the raw HTML string, or None on failure (after one retry).
     """
     script_json = json.dumps(
         {
@@ -383,32 +555,145 @@ def _generate_html(client, topic: str, script: LLMExplainerOutput) -> str | None
         },
         indent=2,
     )
+    user_prompt = _build_html_user_prompt(topic, script_json)
+
+    def _strip_fences(raw: str) -> str:
+        raw = raw.strip()
+        for fence in ("```html", "```"):
+            if raw.startswith(fence):
+                raw = raw[len(fence):].lstrip()
+        if raw.endswith("```"):
+            raw = raw[:-3].rstrip()
+        return raw
+
     try:
         logger.info("Generating animated HTML for topic=%r using model=%s", topic, HTML_MODEL)
         response = client.chat.completions.create(
             model=HTML_MODEL,
             messages=[
                 {"role": "system", "content": HTML_SYSTEM_PROMPT},
-                {"role": "user", "content": _build_html_user_prompt(topic, script_json)},
+                {"role": "user", "content": user_prompt},
             ],
             temperature=0.4,
             max_tokens=8192,
         )
-        html = response.choices[0].message.content or ""
-        # Strip any accidental markdown code fences the model wraps around the HTML
-        html = html.strip()
-        for fence in ("```html", "```"):
-            if html.startswith(fence):
-                html = html[len(fence):].lstrip()
-        if html.endswith("```"):
-            html = html[:-3].rstrip()
-        if not html.lstrip().startswith("<!DOCTYPE"):
-            logger.warning("HTML model did not return a DOCTYPE document; discarding.")
-            return None
-        logger.info("Animated HTML generated successfully (%d bytes)", len(html))
-        return html
+        raw_output = response.choices[0].message.content or ""
+        html = _strip_fences(raw_output)
+
+        if html.lstrip().startswith("<!DOCTYPE"):
+            logger.info("Animated HTML generated successfully (%d bytes)", len(html))
+            return html
+
+        # First attempt failed validation — retry with a stricter follow-up
+        logger.warning("HTML model returned non-DOCTYPE output: %s", raw_output[:300])
+        retry_response = client.chat.completions.create(
+            model=HTML_MODEL,
+            messages=[
+                {"role": "system", "content": HTML_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+                {"role": "assistant", "content": raw_output},
+                {"role": "user", "content": (
+                    "Your last response did not start with <!DOCTYPE html>. "
+                    "Respond with ONLY the raw HTML document this time — "
+                    "no commentary, no markdown fences."
+                )},
+            ],
+            temperature=0.3,
+            max_tokens=8192,
+        )
+        retry_raw = retry_response.choices[0].message.content or ""
+        retry_html = _strip_fences(retry_raw)
+
+        if retry_html.lstrip().startswith("<!DOCTYPE"):
+            logger.info("Animated HTML generated on retry (%d bytes)", len(retry_html))
+            return retry_html
+
+        logger.warning("HTML model still did not return a DOCTYPE document after retry; discarding.")
+        return None
+
     except Exception as exc:  # noqa: BLE001
         logger.error("HTML generation failed: %s", exc)
+        return None
+
+
+# ── HyperFrames composition HTML generation (Part 3, behind flag) ─────────────
+def _generate_composition_html(client, topic: str, script: LLMExplainerOutput) -> str | None:
+    """
+    HyperFrames-aware HTML generation path — only called when
+    USE_COMPOSITION_ENGINE=True. Uses an extended system prompt that
+    instructs the model to structure output as a HyperFrames composition
+    with clip divs, data-start/data-duration, and the three PulseBoard blocks.
+    Falls back to returning None on any failure (caller will use existing path).
+    """
+    composition_system_prompt = HTML_SYSTEM_PROMPT + HYPERFRAMES_SYSTEM_PROMPT_ADDENDUM
+    script_json = json.dumps(
+        {
+            "title": script.title,
+            "category": script.category,
+            "summary": script.summary,
+            "steps": [s.model_dump() for s in script.steps],
+        },
+        indent=2,
+    )
+    user_prompt = _build_html_user_prompt(topic, script_json)
+
+    def _strip_fences(raw: str) -> str:
+        raw = raw.strip()
+        for fence in ("```html", "```"):
+            if raw.startswith(fence):
+                raw = raw[len(fence):].lstrip()
+        if raw.endswith("```"):
+            raw = raw[:-3].rstrip()
+        return raw
+
+    try:
+        logger.info(
+            "Generating HyperFrames composition HTML for topic=%r using model=%s",
+            topic, HTML_MODEL,
+        )
+        response = client.chat.completions.create(
+            model=HTML_MODEL,
+            messages=[
+                {"role": "system", "content": composition_system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.4,
+            max_tokens=8192,
+        )
+        raw_output = response.choices[0].message.content or ""
+        html = _strip_fences(raw_output)
+
+        if html.lstrip().startswith("<!DOCTYPE"):
+            logger.info("HyperFrames composition HTML generated (%d bytes)", len(html))
+            return html
+
+        # Retry once
+        logger.warning("Composition HTML model returned non-DOCTYPE output: %s", raw_output[:300])
+        retry_response = client.chat.completions.create(
+            model=HTML_MODEL,
+            messages=[
+                {"role": "system", "content": composition_system_prompt},
+                {"role": "user", "content": user_prompt},
+                {"role": "assistant", "content": raw_output},
+                {"role": "user", "content": (
+                    "Your last response did not start with <!DOCTYPE html>. "
+                    "Respond with ONLY the raw HTML document this time — "
+                    "no commentary, no markdown fences."
+                )},
+            ],
+            temperature=0.3,
+            max_tokens=8192,
+        )
+        retry_html = _strip_fences(retry_response.choices[0].message.content or "")
+        if retry_html.lstrip().startswith("<!DOCTYPE"):
+            logger.info("HyperFrames composition HTML generated on retry (%d bytes)", len(retry_html))
+            return retry_html
+
+        logger.warning("Composition HTML still did not return DOCTYPE after retry; falling back.")
+        return None
+
+    except Exception as exc:  # noqa: BLE001
+        logger.error("HyperFrames composition HTML generation failed: %s", exc)
         return None
 
 
@@ -424,9 +709,14 @@ def generate_explainer(topic: str) -> Explainer:
     """
     client = _get_nim_client()
     storage = _get_storage_backend()
+    storage_configured = storage is not None
     run_id = str(uuid.uuid4())
     generated_at = datetime.now(timezone.utc)
     last_error: Exception | None = None
+
+    # Part 2 — Research grounding: call once before the retry loop
+    research_context, research_sources = _research_topic(topic)
+    research_used = bool(research_context)
 
     for attempt in range(1, MAX_RETRIES + 1):
         # Slightly raise temperature on retries to escape stuck outputs
@@ -441,7 +731,7 @@ def generate_explainer(topic: str) -> Explainer:
                 model=SCRIPT_MODEL,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": _build_user_prompt(topic)},
+                    {"role": "user", "content": _build_user_prompt(topic, research_context=research_context)},
                 ],
                 temperature=temperature,
                 max_tokens=2048,
@@ -476,14 +766,31 @@ def generate_explainer(topic: str) -> Explainer:
                 "provider": "nvidia-nim",
                 "script_model": SCRIPT_MODEL,
                 "html_model": HTML_MODEL,
+                # Part 2 — research provenance
+                "research_used": research_used,
+                "research_sources": research_sources,
             }
 
             # Generate animated HTML (second LLM pass)
-            html_content = _generate_html(client, topic, llm_output)
+            # Part 0 — gate on ENABLE_COMPOSITION_ENGINE flag
+            if USE_COMPOSITION_ENGINE:
+                html_content = _generate_composition_html(client, topic, llm_output)
+                if html_content is None:
+                    # Composition path failed — fall back to standard path
+                    logger.warning(
+                        "Composition HTML generation failed; falling back to standard _generate_html."
+                    )
+                    html_content = _generate_html(client, topic, llm_output)
+            else:
+                html_content = _generate_html(client, topic, llm_output)
+
+            html_generation_failed = html_content is None
 
             # Persist JSON + HTML + manifest to B2
             topic_slug = _slugify(topic)
-            b2_url, manifest_url, html_url = _upload_to_b2(storage, run_id, topic_slug, payload, html_content)
+            b2_url, manifest_url, html_url = _upload_to_b2(
+                storage, run_id, topic_slug, payload, html_content
+            )
 
             return Explainer(
                 id=run_id,
@@ -497,6 +804,12 @@ def generate_explainer(topic: str) -> Explainer:
                 manifest_url=manifest_url,
                 html_url=html_url,
                 generated_at=generated_at,
+                # Part 1 — diagnostic fields
+                storage_configured=storage_configured,
+                html_generation_failed=html_generation_failed,
+                # Part 2 — research provenance
+                research_used=research_used,
+                research_sources=research_sources,
             )
 
         except Exception as exc:  # noqa: BLE001

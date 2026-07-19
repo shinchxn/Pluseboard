@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<!--
+  PulseBoard Composition Block: phase-caption
+  Self-contained. No external dependencies.
+
+  Attributes:
+    data-phase        — short phase label (e.g. "Phase 1: SYN")
+    data-color        — accent color for the phase tag
+    data-description  — 1–2 sentence caption (HTML allowed)
+    data-fields       — optional monospace field line (e.g. "seq=100 | ack=0 | flags=SYN")
+
+  API:
+    root.update({ phase, color, description, fields }) — re-render with new data
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PulseBoard Block — phase-caption</title>
+  <style>
+    body {
+      margin: 0;
+      background: #0d0d14;
+      display: flex;
+      align-items: flex-end;
+      min-height: 120px;
+      padding: 0 24px 24px;
+      box-sizing: border-box;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Block markup ── -->
+<div class="pb-phase-caption"
+     data-phase="Phase 1: SYN"
+     data-color="#7c6fff"
+     data-description="The client sends a TCP segment with the SYN flag set to initiate the three-way handshake. It selects a random initial sequence number."
+     data-fields="seq=100 | ack=0 | flags=SYN | win=65535">
+
+  <style>
+    .pb-phase-caption {
+      width: 100%;
+      padding: 16px 24px;
+      border-radius: 14px;
+      background: rgba(20, 20, 30, 0.95);
+      border: 1px solid #2a2a3a;
+      backdrop-filter: blur(8px);
+      box-sizing: border-box;
+    }
+
+    .pb-phase-caption .pb-tag {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font: 700 11px/1.4 'JetBrains Mono', 'Fira Mono', monospace;
+      color: #fff;
+      margin-bottom: 10px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .pb-phase-caption .pb-desc {
+      color: #c0c0d0;
+      font: 400 15px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      margin: 0 0 8px;
+    }
+
+    .pb-phase-caption .pb-fields {
+      color: #8a7fff;
+      font: 600 12px/1.4 'JetBrains Mono', 'Fira Mono', monospace;
+      letter-spacing: 0.03em;
+      opacity: 0.85;
+    }
+
+    .pb-phase-caption .pb-fields:empty {
+      display: none;
+    }
+  </style>
+
+  <script>
+    (function (root) {
+      function render(phase, color, description, fields) {
+        root.innerHTML = `
+          <span class="pb-tag" style="background:${color}">${phase}</span>
+          <p class="pb-desc">${description}</p>
+          <div class="pb-fields">${fields || ""}</div>
+        `;
+
+        // WAAPI slide-up entrance
+        root.animate(
+          [{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0)" }],
+          { duration: 300, easing: "cubic-bezier(.4,0,.2,1)", fill: "forwards" }
+        );
+      }
+
+      // Initial render from data attributes
+      render(
+        root.dataset.phase || "",
+        root.dataset.color || "#7c6fff",
+        root.dataset.description || "",
+        root.dataset.fields || ""
+      );
+
+      // Public API — call this from the parent composition controller
+      root.update = function ({ phase, color, description, fields } = {}) {
+        if (phase !== undefined) root.dataset.phase = phase;
+        if (color !== undefined) root.dataset.color = color;
+        if (description !== undefined) root.dataset.description = description;
+        if (fields !== undefined) root.dataset.fields = fields;
+        render(
+          root.dataset.phase,
+          root.dataset.color,
+          root.dataset.description,
+          root.dataset.fields
+        );
+      };
+
+    })(document.currentScript.closest(".pb-phase-caption"));
+  </script>
+</div>
+
+</body>
+</html>

@@ -5,6 +5,7 @@ Endpoints:
   POST /api/generate           Generate a new explainer via NVIDIA NIM → store in B2
   GET  /api/library            List all saved explainers from B2
   GET  /api/explainer/{id}     Fetch a single explainer from B2 by run_id
+  GET  /api/config-status      Debug: reports which integrations are configured
   GET  /health                 Health check
 """
 from __future__ import annotations
@@ -21,6 +22,11 @@ from fastapi.responses import JSONResponse
 load_dotenv()
 
 from pipeline import (  # noqa: E402
+    NVIDIA_API_KEY,
+    B2_KEY_ID,
+    B2_APP_KEY,
+    B2_BUCKET_NAME,
+    B2_ENDPOINT_URL,
     GenerationError,
     _fetch_b2_explainer,
     _list_b2_explainers,
@@ -49,6 +55,41 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("PulseBoard API starting — environment=%s", ENVIRONMENT)
+
+    # Startup configuration check
+    missing: list[str] = []
+    if not NVIDIA_API_KEY:
+        missing.append("NVIDIA_API_KEY")
+    if not B2_KEY_ID:
+        missing.append("B2_KEY_ID")
+    if not B2_APP_KEY:
+        missing.append("B2_APP_KEY")
+    if not B2_BUCKET_NAME:
+        missing.append("B2_BUCKET_NAME")
+    if not B2_ENDPOINT_URL:
+        missing.append("B2_ENDPOINT_URL")
+
+    if missing:
+        logger.warning(
+            "Missing environment variables — some features will be degraded: %s",
+            ", ".join(missing),
+        )
+        if "NVIDIA_API_KEY" in missing:
+            logger.error(
+                "NVIDIA_API_KEY is required for generation. "
+                "Set it in backend/.env before generating explainers."
+            )
+        b2_missing = [v for v in missing if v.startswith("B2_")]
+        if b2_missing:
+            logger.warning(
+                "B2 storage is not configured (%s). "
+                "Explainers will be generated but NOT persisted to cloud storage. "
+                "html_url will be null until B2 credentials are set.",
+                ", ".join(b2_missing),
+            )
+    else:
+        logger.info("All required environment variables are set. Ready.")
+
     yield
     logger.info("PulseBoard API shutting down.")
 
@@ -104,6 +145,22 @@ async def health_check():
     return {"status": "ok", "service": "PulseBoard API"}
 
 
+@app.get("/api/config-status", tags=["Meta"])
+async def config_status():
+    """
+    Debug endpoint: reports which integrations are configured.
+    Use this to diagnose why html_url may be null.
+    """
+    return {
+        "nvidia_configured": bool(NVIDIA_API_KEY),
+        "b2_configured": all([B2_KEY_ID, B2_APP_KEY, B2_BUCKET_NAME, B2_ENDPOINT_URL]),
+        "b2_key_id_set": bool(B2_KEY_ID),
+        "b2_app_key_set": bool(B2_APP_KEY),
+        "b2_bucket_set": bool(B2_BUCKET_NAME),
+        "b2_endpoint_set": bool(B2_ENDPOINT_URL),
+    }
+
+
 @app.post(
     "/api/generate",
     response_model=GenerateResponse,
@@ -121,6 +178,7 @@ async def generate(body: GenerateRequest) -> GenerateResponse:
 
     - Calls NVIDIA NIM (meta/llama-3.3-70b-instruct by default)
     - Validates the JSON output schema, retries up to MAX_RETRIES on failure
+    - Grounds the script in Tavily-retrieved facts (if TAVILY_API_KEY is set)
     - Persists the explainer + provenance manifest to Backblaze B2
     - Returns the full explainer data
     """
@@ -198,9 +256,16 @@ async def get_explainer(explainer_id: str) -> GenerateResponse:
             steps_count=len(steps),
             b2_url=data.get("b2_url"),
             manifest_url=data.get("manifest_url"),
+            html_url=data.get("html_url"),
             generated_at=datetime.fromisoformat(
                 data.get("generated_at", datetime.utcnow().isoformat())
             ),
+            # Part 1 — diagnostic fields (may not exist in older stored payloads)
+            storage_configured=data.get("storage_configured", True),
+            html_generation_failed=data.get("html_generation_failed", False),
+            # Part 2 — research provenance (may not exist in older stored payloads)
+            research_used=data.get("research_used", False),
+            research_sources=data.get("research_sources", []),
         )
     except Exception as exc:
         logger.error("Failed to parse stored explainer %s: %s", explainer_id, exc)

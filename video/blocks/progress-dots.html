@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<!--
+  PulseBoard Composition Block: progress-dots
+  Self-contained. No external dependencies. WAAPI-driven transitions.
+  Usage: Set data-step-count and data-current-step. Call root.setActiveStep(i) externally.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PulseBoard Block — progress-dots</title>
+  <style>
+    body { margin: 0; background: #0d0d14; display: flex; align-items: center; justify-content: center; min-height: 60px; }
+  </style>
+</head>
+<body>
+
+<!-- ── Block markup ── -->
+<div class="pb-progress-dots" data-step-count="7" data-current-step="0">
+  <style>
+    .pb-progress-dots {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 16px;
+    }
+    .pb-progress-dots .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #2a2a3a;
+      border: 2px solid #3a3a5a;
+      transition: background 0.3s, transform 0.3s;
+    }
+    .pb-progress-dots .dot.active {
+      background: #7c6fff;
+      border-color: #7c6fff;
+      transform: scale(1.5);
+      box-shadow: 0 0 8px rgba(124, 111, 255, 0.6);
+    }
+    .pb-progress-dots .dot.completed {
+      background: #4a3fa8;
+      border-color: #5a4fc8;
+    }
+  </style>
+  <script>
+    (function (root) {
+      const count = parseInt(root.dataset.stepCount, 10);
+      const dots = Array.from({ length: count }).map((_, i) => {
+        const d = document.createElement("div");
+        d.className = "dot";
+        d.dataset.index = i;
+        d.title = `Step ${i + 1}`;
+        root.appendChild(d);
+        return d;
+      });
+
+      root.setActiveStep = function (stepIndex) {
+        dots.forEach((d, idx) => {
+          d.classList.remove("active", "completed");
+          if (idx === stepIndex) {
+            d.classList.add("active");
+            // WAAPI pop animation
+            d.animate(
+              [{ transform: "scale(1)" }, { transform: "scale(1.8)" }, { transform: "scale(1.5)" }],
+              { duration: 300, easing: "cubic-bezier(.4,0,.2,1)", fill: "forwards" }
+            );
+          } else if (idx < stepIndex) {
+            d.classList.add("completed");
+          }
+        });
+      };
+
+      // Initialise to the declared current step
+      root.setActiveStep(parseInt(root.dataset.currentStep, 10) || 0);
+    })(document.currentScript.closest(".pb-progress-dots"));
+  </script>
+</div>
+
+</body>
+</html>
