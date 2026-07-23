@@ -69,6 +69,8 @@ class Explainer(BaseModel):
     # Part 2 — Tavily research provenance
     research_used: bool = Field(False, description="True if Tavily grounding was applied.")
     research_sources: list[str] = Field(default_factory=list, description="Source URLs from Tavily.")
+    # Accuracy verification
+    accuracy_verified: bool = Field(False, description="True if the accuracy evaluator found no issues.")
 
 
 class LibraryItem(BaseModel):
@@ -81,6 +83,7 @@ class LibraryItem(BaseModel):
     steps_count: int
     generated_at: datetime
     b2_url: str
+    html_url: str | None = None
 
 
 class GenerateResponse(BaseModel):

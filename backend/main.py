@@ -14,9 +14,13 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
+# pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
+# pyrefly: ignore [missing-import]
 from fastapi import FastAPI, HTTPException, Request
+# pyrefly: ignore [missing-import]
 from fastapi.middleware.cors import CORSMiddleware
+# pyrefly: ignore [missing-import]
 from fastapi.responses import JSONResponse
 
 load_dotenv()
@@ -168,7 +172,7 @@ async def config_status():
     tags=["Explainers"],
     summary="Generate a new visual explainer",
     responses={
-        422: {"model": ErrorResponse, "description": "Generation failed after retries"},
+        502: {"model": ErrorResponse, "description": "Generation failed after retries"},
         500: {"model": ErrorResponse, "description": "Internal error"},
     },
 )
@@ -189,8 +193,8 @@ async def generate(body: GenerateRequest) -> GenerateResponse:
     except GenerationError as exc:
         logger.error("GenerationError: %s", exc)
         raise HTTPException(
-            status_code=422,
-            detail=str(exc),
+            status_code=502,
+            detail="Generation service unavailable after retries — please try again.",
         ) from exc
 
     return GenerateResponse(explainer=explainer)
@@ -266,9 +270,53 @@ async def get_explainer(explainer_id: str) -> GenerateResponse:
             # Part 2 — research provenance (may not exist in older stored payloads)
             research_used=data.get("research_used", False),
             research_sources=data.get("research_sources", []),
+            # Accuracy verification
+            accuracy_verified=data.get("accuracy_verified", False),
         )
     except Exception as exc:
         logger.error("Failed to parse stored explainer %s: %s", explainer_id, exc)
         raise HTTPException(status_code=500, detail="Stored explainer data is malformed.") from exc
 
     return GenerateResponse(explainer=explainer)
+
+
+@app.get(
+    "/api/explainer/{explainer_id}/html",
+    tags=["Explainers"],
+    summary="Serve the animated HTML for an explainer (proxies from private B2 bucket)",
+)
+async def get_explainer_html(explainer_id: str):
+    """
+    Fetch the animated HTML file from Backblaze B2 using server-side credentials
+    and stream it directly to the browser. This bypasses the private bucket
+    restriction — the browser never needs direct B2 access.
+    """
+    # pyrefly: ignore [missing-import]
+    from fastapi.responses import HTMLResponse
+    from pipeline import _get_storage_backend
+
+    storage = _get_storage_backend()
+    if storage is None:
+        raise HTTPException(status_code=503, detail="B2 storage is not configured.")
+
+    try:
+        # Find the HTML key for this run_id
+        target_key: str | None = None
+        page = storage.list(prefix="explainers/")
+        for entry in page.entries:
+            if explainer_id in entry.key and entry.key.endswith(".html"):
+                target_key = entry.key
+                break
+
+        if not target_key:
+            raise HTTPException(status_code=404, detail=f"HTML for explainer '{explainer_id}' not found.")
+
+        raw = storage.get(target_key)
+        html_content = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+        return HTMLResponse(content=html_content, status_code=200)
+
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to proxy HTML for explainer %s: %s", explainer_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to retrieve HTML from storage.") from exc

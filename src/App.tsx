@@ -37,10 +37,11 @@ const USE_HYPERFRAMES_PLAYER =
 interface SavedTopic {
   id: string;
   title: string;
-  category: "networking" | "database" | "operating-systems" | "algorithms";
+  category: "networking" | "database" | "operating-systems" | "algorithms" | "general";
   lastUsed: string;
   stepsCount: number;
   iconType: "network" | "database" | "cpu" | "algorithm";
+  html_url: string | null;
 }
 
 // Pre-defined Example Topics
@@ -61,7 +62,8 @@ const MOCK_SAVED_TOPICS: SavedTopic[] = [
     category: "networking",
     lastUsed: "2 hours ago",
     stepsCount: 4,
-    iconType: "network"
+    iconType: "network",
+    html_url: null,
   },
   {
     id: "2",
@@ -69,7 +71,8 @@ const MOCK_SAVED_TOPICS: SavedTopic[] = [
     category: "database",
     lastUsed: "Yesterday",
     stepsCount: 5,
-    iconType: "database"
+    iconType: "database",
+    html_url: null,
   },
   {
     id: "3",
@@ -77,7 +80,8 @@ const MOCK_SAVED_TOPICS: SavedTopic[] = [
     category: "operating-systems",
     lastUsed: "Oct 12, 2026",
     stepsCount: 6,
-    iconType: "cpu"
+    iconType: "cpu",
+    html_url: null,
   },
   {
     id: "4",
@@ -85,7 +89,8 @@ const MOCK_SAVED_TOPICS: SavedTopic[] = [
     category: "algorithms",
     lastUsed: "Oct 5, 2026",
     stepsCount: 6,
-    iconType: "algorithm"
+    iconType: "algorithm",
+    html_url: null,
   },
   {
     id: "5",
@@ -93,7 +98,8 @@ const MOCK_SAVED_TOPICS: SavedTopic[] = [
     category: "networking",
     lastUsed: "Sep 28, 2026",
     stepsCount: 5,
-    iconType: "network"
+    iconType: "network",
+    html_url: null,
   }
 ];
 
@@ -105,9 +111,209 @@ interface Explainer {
   summary: string; steps: SlideStep[]; steps_count: number;
   b2_url: string | null; manifest_url: string | null; html_url: string | null; generated_at: string;
 }
+
+// Serve HTML through our backend proxy so private B2 bucket auth is handled server-side.
+const getHtmlProxyUrl = (explainer: Explainer): string | null => {
+  if (!explainer.html_url) return null;
+  return `${API_BASE}/api/explainer/${explainer.id}/html`;
+};
 interface LibraryApiItem {
   id: string; topic: string; title: string; category: string;
   summary: string; steps_count: number; generated_at: string; b2_url: string;
+  html_url: string | null;
+}
+
+// ── Interactive Visual Simulation Diagram Component ─────────────────────────────
+function VisualSimulation({ 
+  category, 
+  stepIndex, 
+  totalSteps, 
+  phaseTitle,
+  topicTitle = ""
+}: { 
+  category: string; 
+  stepIndex: number; 
+  totalSteps: number; 
+  phaseTitle: string;
+  topicTitle?: string;
+}) {
+  // Smart category detection fallback based on topic keywords
+  const activeCategory = (() => {
+    if (category && category !== "general") return category;
+    const t = (topicTitle || phaseTitle || "").toLowerCase();
+    if (t.includes("tcp") || t.includes("ip") || t.includes("packet") || t.includes("dns") || t.includes("net") || t.includes("http") || t.includes("osi") || t.includes("socket") || t.includes("handshake")) return "networking";
+    if (t.includes("db") || t.includes("sql") || t.includes("base") || t.includes("tree") || t.includes("search") || t.includes("commit") || t.includes("index") || t.includes("query") || t.includes("b-tree")) return "database";
+    if (t.includes("cpu") || t.includes("thread") || t.includes("schedul") || t.includes("os") || t.includes("mem") || t.includes("process") || t.includes("cache") || t.includes("kernel") || t.includes("lock")) return "operating-systems";
+    return "algorithms";
+  })();
+
+  const progressPercent = Math.min(100, Math.max(15, ((stepIndex + 1) / totalSteps) * 100));
+
+  if (activeCategory === "networking") {
+    const packetPositions = ["15%", "40%", "65%", "85%"];
+    const activePos = packetPositions[stepIndex % packetPositions.length];
+    
+    return (
+      <div className="bg-gradient-to-br from-slate-900/95 to-slate-950/95 backdrop-blur-xl border border-slate-700/50 rounded-3xl p-4 relative overflow-hidden my-3 shadow-2xl shadow-indigo-900/20 ring-1 ring-white/5">
+        <div className="flex justify-between items-center relative z-10">
+          <div className={`p-5 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all duration-500 ${stepIndex === 0 ? "border-indigo-500 bg-indigo-500/20 text-indigo-300 scale-110 shadow-[0_0_30px_rgba(99,102,241,0.3)] ring-2 ring-indigo-500/50 z-20" : "border-slate-800 bg-slate-900/80 text-slate-400 shadow-lg"}`}>
+            <Network className="w-10 h-10" strokeWidth={2.5} />
+            <span className="text-sm font-mono font-bold tracking-wide">Client Host</span>
+            <span className="text-xs px-2.5 py-1 rounded-md bg-slate-950/80 text-slate-300 font-mono ring-1 ring-white/10">192.168.1.10</span>
+          </div>
+
+          <div className={`p-5 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all duration-500 ${stepIndex === 1 || stepIndex === 2 ? "border-indigo-500 bg-indigo-500/20 text-indigo-300 scale-110 shadow-[0_0_30px_rgba(99,102,241,0.3)] ring-2 ring-indigo-500/50 z-20" : "border-slate-800 bg-slate-900/80 text-slate-400 shadow-lg"}`}>
+            <Layers className="w-10 h-10" strokeWidth={2.5} />
+            <span className="text-sm font-mono font-bold tracking-wide">Gateway Router</span>
+            <span className="text-xs px-2.5 py-1 rounded-md bg-slate-950/80 text-slate-300 font-mono ring-1 ring-white/10">10.0.0.1</span>
+          </div>
+
+          <div className={`p-5 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all duration-500 ${stepIndex >= 3 ? "border-emerald-500 bg-emerald-500/20 text-emerald-300 scale-110 shadow-[0_0_30px_rgba(16,185,129,0.3)] ring-2 ring-emerald-500/50 z-20" : "border-slate-800 bg-slate-900/80 text-slate-400 shadow-lg"}`}>
+            <Database className="w-10 h-10" strokeWidth={2.5} />
+            <span className="text-sm font-mono font-bold tracking-wide">Target Server</span>
+            <span className="text-xs px-2.5 py-1 rounded-md bg-slate-950/80 text-slate-300 font-mono ring-1 ring-white/10">172.16.0.42</span>
+          </div>
+        </div>
+
+        {/* Glowing Cable Track */}
+        <div className="absolute top-1/2 left-20 right-20 h-1.5 bg-slate-800/80 rounded-full -translate-y-1/2 z-0 shadow-inner">
+          <motion.div 
+            className="h-full bg-gradient-to-r from-indigo-600 via-indigo-400 to-indigo-600 rounded-full shadow-[0_0_15px_rgba(129,140,248,0.6)]" 
+            animate={{ width: `${progressPercent}%` }}
+            transition={{ duration: 0.6, ease: "easeInOut" }}
+          />
+        </div>
+
+        {/* Premium Packet Pill */}
+        <motion.div 
+          className="absolute top-1/2 -translate-y-1/2 z-30 px-4 py-2 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white rounded-full text-sm font-mono font-bold shadow-[0_0_20px_rgba(99,102,241,0.6)] flex items-center gap-2 border border-indigo-400/50"
+          animate={{ left: activePos }}
+          transition={{ type: "spring", stiffness: 150, damping: 18 }}
+        >
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,0.8)] animate-pulse" />
+          <span>{phaseTitle || `Packet #${stepIndex + 1}`}</span>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (activeCategory === "database") {
+    return (
+      <div className="bg-gradient-to-br from-slate-900/95 to-slate-950/95 backdrop-blur-xl border border-slate-700/50 rounded-3xl p-4 relative overflow-hidden my-3 shadow-2xl shadow-indigo-900/20 ring-1 ring-white/5 space-y-3">
+        <div className="text-sm font-mono text-slate-400 uppercase tracking-widest flex items-center justify-between bg-slate-900/50 px-4 py-2 rounded-lg border border-slate-800/50">
+          <span className="flex items-center gap-2"><Database className="w-4 h-4 text-indigo-400" /> Index Tree Search Path</span>
+          <span className="text-emerald-400 font-bold bg-emerald-950/50 px-3 py-1 rounded-md border border-emerald-500/30">Depth Level: {stepIndex + 1}</span>
+        </div>
+
+        <div className="flex flex-col items-center gap-4">
+          <div className={`px-8 py-3 rounded-2xl border-2 text-sm font-mono font-bold transition-all duration-500 ${stepIndex === 0 ? "border-indigo-500 bg-indigo-500/20 text-indigo-200 shadow-[0_0_30px_rgba(99,102,241,0.3)] ring-2 ring-indigo-500/50 scale-110" : "border-slate-700 bg-slate-800/80 text-slate-300 shadow-md"}`}>
+            Root Page [ Key: 50 ]
+          </div>
+
+          <div className="w-1 h-6 bg-gradient-to-b from-slate-700 to-slate-800 rounded-full" />
+
+          <div className="flex gap-3">
+            <div className={`px-5 py-2.5 rounded-xl border-2 text-sm font-mono transition-all duration-500 ${stepIndex === 1 ? "border-indigo-500 bg-indigo-500/20 text-indigo-200 scale-110 shadow-[0_0_20px_rgba(99,102,241,0.25)] ring-2 ring-indigo-500/40 z-10" : "border-slate-800 bg-slate-900/60 text-slate-500"}`}>
+              Internal [ 10 | 30 ]
+            </div>
+            <div className={`px-5 py-2.5 rounded-xl border-2 text-sm font-mono transition-all duration-500 ${stepIndex >= 2 ? "border-indigo-500 bg-indigo-500/20 text-indigo-200 scale-110 shadow-[0_0_20px_rgba(99,102,241,0.25)] ring-2 ring-indigo-500/40 z-10" : "border-slate-800 bg-slate-900/60 text-slate-500"}`}>
+              Internal [ 70 | 90 ]
+            </div>
+          </div>
+
+          <div className="w-1 h-6 bg-gradient-to-b from-slate-700 to-slate-800 rounded-full" />
+
+          <div className="flex gap-3">
+            {[10, 30, 50, 70, 90].map((val, idx) => (
+              <div 
+                key={val} 
+                className={`px-4 py-2 rounded-xl border-2 text-xs font-mono transition-all duration-500 ${stepIndex === idx ? "border-emerald-400 bg-emerald-500/20 text-emerald-100 font-bold scale-125 shadow-[0_0_25px_rgba(16,185,129,0.4)] ring-2 ring-emerald-400/50 z-20" : "border-slate-800 bg-slate-900/60 text-slate-500 hover:border-slate-600"}`}
+              >
+                Page #{val}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (activeCategory === "operating-systems") {
+    return (
+      <div className="bg-gradient-to-br from-slate-900/95 to-slate-950/95 backdrop-blur-xl border border-slate-700/50 rounded-3xl p-4 relative overflow-hidden my-3 space-y-3 shadow-2xl shadow-indigo-900/20 ring-1 ring-white/5">
+        <div className="flex justify-between items-center text-sm font-mono text-slate-400 uppercase tracking-widest bg-slate-900/50 px-4 py-2 rounded-lg border border-slate-800/50">
+          <span className="flex items-center gap-2"><Cpu className="w-4 h-4 text-amber-400" /> Ready Queue & CPU Execution</span>
+          <span className="text-amber-400 font-bold bg-amber-950/50 px-3 py-1 rounded-md border border-amber-500/30">Cycle: t={stepIndex * 10}ms</span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
+          <div className="sm:col-span-2 bg-slate-800/40 border border-slate-700/50 rounded-2xl p-4 shadow-inner">
+            <span className="text-xs font-mono text-slate-500 uppercase font-bold tracking-widest block mb-4">Process Ready Queue</span>
+            <div className="flex gap-3">
+              {["P1", "P2", "P3", "P4"].map((proc, idx) => (
+                <div
+                  key={proc}
+                  className={`px-4 py-3 rounded-xl border-2 text-sm font-mono flex-1 text-center transition-all duration-500 ${idx === stepIndex % 4 ? "border-amber-500 bg-amber-500/20 text-amber-200 font-bold shadow-[0_0_20px_rgba(245,158,11,0.3)] ring-2 ring-amber-500/40 scale-110 z-10" : "border-slate-700 bg-slate-900/80 text-slate-400"}`}
+                >
+                  {proc}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-2 text-center transition-all duration-500 ${stepIndex >= 0 ? "border-indigo-500 bg-indigo-500/10 text-indigo-200 shadow-[0_0_30px_rgba(99,102,241,0.2)] ring-2 ring-indigo-500/40 scale-105" : "border-slate-800 bg-slate-900"}`}>
+            <Cpu className="w-12 h-12 animate-pulse text-indigo-400" strokeWidth={2} />
+            <span className="text-sm font-mono font-bold tracking-widest">CPU CORE 0</span>
+            <span className="text-xs px-3 py-1.5 rounded-lg bg-indigo-950 border border-indigo-500/30 text-indigo-300 font-mono font-bold shadow-inner">
+              Running: P{(stepIndex % 4) + 1}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Default / Algorithms / General Simulation
+  return (
+    <div className="bg-gradient-to-br from-slate-900/95 to-slate-950/95 backdrop-blur-xl border border-slate-700/50 rounded-3xl p-4 relative overflow-hidden my-3 space-y-4 shadow-2xl shadow-indigo-900/20 ring-1 ring-white/5">
+      <div className="flex justify-between items-center text-sm font-mono text-slate-400 uppercase tracking-widest bg-slate-900/50 px-4 py-2 rounded-lg border border-slate-800/50">
+        <span className="flex items-center gap-2"><GitBranch className="w-4 h-4 text-indigo-400" /> State Machine Visualization</span>
+        <span className="text-indigo-400 font-bold bg-indigo-950/50 px-3 py-1 rounded-md border border-indigo-500/30">Step {stepIndex + 1} of {totalSteps}</span>
+      </div>
+
+      <div className="flex gap-2 justify-center py-2">
+        {[12, 24, 37, 45, 53, 68, 89].map((val, idx) => {
+          const isActive = idx === (stepIndex % 7);
+          const isTarget = idx === ((stepIndex + 2) % 7);
+          return (
+            <div
+              key={idx}
+              className={`w-11 h-12 rounded-2xl border-2 flex flex-col items-center justify-center font-mono transition-all duration-500 ${
+                isActive 
+                  ? "border-indigo-400 bg-indigo-500/20 text-indigo-100 font-bold scale-125 shadow-[0_0_25px_rgba(129,140,248,0.4)] ring-2 ring-indigo-400/50 z-20" 
+                  : isTarget
+                  ? "border-emerald-500 bg-emerald-500/10 text-emerald-300 scale-105 border-dashed"
+                  : "border-slate-700 bg-slate-800/80 text-slate-400 hover:border-slate-500"
+              }`}
+            >
+              <span className="text-sm">{val}</span>
+              <span className="text-[10px] text-slate-500 font-mono mt-1 font-bold">[{idx}]</span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex justify-center gap-3 text-sm font-mono pt-1">
+        <span className="px-4 py-2 bg-indigo-950/60 text-indigo-300 border border-indigo-500/40 rounded-xl flex items-center gap-2 shadow-inner">
+          <span className="w-2.5 h-2.5 rounded-full bg-indigo-400 shadow-[0_0_8px_rgba(129,140,248,0.8)] animate-pulse" />
+          Active Pointer: <strong className="text-white">idx=[{stepIndex % 7}]</strong>
+        </span>
+        <span className="px-4 py-2 bg-slate-900/80 text-slate-300 border border-slate-700/80 rounded-xl shadow-inner font-semibold">
+          State: <span className="text-emerald-400">{phaseTitle || "Executing"}</span>
+        </span>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -163,6 +369,7 @@ export default function App() {
         id: explainer.id, title: explainer.title,
         category: explainer.category as SavedTopic["category"],
         lastUsed: "Just now", stepsCount: explainer.steps_count,
+        html_url: explainer.html_url ?? null,
         iconType: explainer.category === "database" ? "database"
                 : explainer.category === "operating-systems" ? "cpu"
                 : explainer.category === "algorithms" ? "algorithm" : "network",
@@ -221,6 +428,7 @@ export default function App() {
             category: item.category as SavedTopic["category"],
             lastUsed: new Date(item.generated_at).toLocaleDateString(),
             stepsCount: item.steps_count,
+            html_url: item.html_url ?? null,
             iconType: item.category === "database" ? "database"
                     : item.category === "operating-systems" ? "cpu"
                     : item.category === "algorithms" ? "algorithm" : "network",
@@ -686,11 +894,11 @@ export default function App() {
             className="fixed inset-0 bg-slate-950/90 z-50 flex items-center justify-center p-4 sm:p-6"
           >
             <motion.div
-              initial={{ scale: 0.95, y: 15 }}
+              initial={{ scale: 0.96, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.95, y: 15 }}
-              transition={{ type: "spring", damping: 25, stiffness: 350 }}
-              className="bg-white w-full max-w-5xl rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[85vh] sm:h-[80vh]"
+              exit={{ scale: 0.96, y: 20 }}
+              transition={{ type: "spring", damping: 28, stiffness: 300 }}
+              className="bg-white w-full max-w-[96vw] rounded-[2rem] overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col h-[92vh] sm:h-[94vh] ring-1 ring-slate-800/50"
             >
               
               {/* Modal Header */}
@@ -725,13 +933,13 @@ export default function App() {
                     <hyperframes-player
                       id="hyperframes-explainer-player"
                       ref={hyperframesPlayerRef as React.RefObject<HTMLElement>}
-                      src={generatedExplainer.html_url}
+                      src={getHtmlProxyUrl(generatedExplainer)!}
                       controls
                       className="flex-1 w-full border-0 block"
                     />
                     <div className="bg-slate-900 px-6 py-3 text-slate-400 text-xs flex justify-between items-center border-t border-slate-800 font-mono">
                       <a
-                        href={generatedExplainer.html_url}
+                        href={getHtmlProxyUrl(generatedExplainer)!}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-indigo-400 hover:text-indigo-300 underline"
@@ -742,18 +950,18 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  /* ── Existing path: Animated HTML page from B2 via iframe ── */
+                  /* ── Existing path: Animated HTML page from B2 via backend proxy ── */
                   <div className="flex-1 flex flex-col bg-slate-950">
                     <iframe
                       id="animated-explainer-iframe"
-                      src={generatedExplainer.html_url}
+                      src={getHtmlProxyUrl(generatedExplainer)!}
                       title={`Animated explainer: ${generatedTopic}`}
                       className="flex-1 w-full border-0"
                       sandbox="allow-scripts allow-same-origin"
                     />
                     <div className="bg-slate-900 px-6 py-3 text-slate-400 text-xs flex justify-between items-center border-t border-slate-800 font-mono">
                       <a
-                        href={generatedExplainer.html_url}
+                        href={getHtmlProxyUrl(generatedExplainer)!}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-indigo-400 hover:text-indigo-300 underline"
@@ -766,10 +974,10 @@ export default function App() {
                 )
               ) : (
                 /* ── Slide-deck fallback (no HTML yet or B2 not configured) ─ */
-                <div className="flex-1 bg-slate-950 p-6 sm:p-8 flex flex-col justify-between text-white overflow-y-auto">
+                <div className="flex-1 bg-slate-950 p-6 sm:p-8 flex flex-col justify-between text-white overflow-hidden min-h-0">
                   
                   {/* Active Slide Visual Layout */}
-                  <div className="space-y-6 flex-1 flex flex-col justify-center max-w-3xl mx-auto w-full">
+                  <div className="space-y-3 flex-1 flex flex-col justify-center max-w-3xl mx-auto w-full min-h-0">
                     
                     {/* Step indicators */}
                     <div className="flex items-center gap-2 justify-center">
@@ -794,7 +1002,7 @@ export default function App() {
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: -20 }}
                         transition={{ duration: 0.25 }}
-                        className="space-y-6 bg-slate-900/60 p-6 sm:p-8 rounded-2xl border border-slate-800"
+                        className="space-y-4 bg-slate-900/60 p-5 sm:p-6 rounded-2xl border border-slate-800 overflow-y-auto min-h-0"
                       >
                         <div className="flex items-center justify-between">
                           <span className="text-xs sm:text-sm font-bold tracking-widest text-indigo-400 uppercase font-mono">
@@ -805,11 +1013,20 @@ export default function App() {
                           </span>
                         </div>
 
-                        <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-100 font-display">
+                        <h3 className="text-lg sm:text-xl font-extrabold text-slate-100 font-display">
                           {slides[previewStep].title}
                         </h3>
 
-                        <p className="text-slate-300 text-base sm:text-lg leading-relaxed">
+                        {/* Interactive Visual Simulation Canvas */}
+                        <VisualSimulation 
+                          category={generatedExplainer?.category || "general"}
+                          stepIndex={previewStep}
+                          totalSteps={slides.length}
+                          phaseTitle={slides[previewStep].title}
+                          topicTitle={generatedTopic}
+                        />
+
+                        <p className="text-slate-300 text-sm sm:text-base leading-relaxed line-clamp-2">
                           {slides[previewStep].description}
                         </p>
 
@@ -828,7 +1045,7 @@ export default function App() {
                   </div>
 
                   {/* Presentation Navigation Controls (Large targets for Touchscreens / Smartboards) */}
-                  <div className="mt-6 pt-6 border-t border-slate-900 flex items-center justify-between gap-4 max-w-3xl mx-auto w-full">
+                  <div className="mt-3 pt-4 border-t border-slate-900 flex items-center justify-between gap-4 max-w-3xl mx-auto w-full">
                     
                     <button
                       id="prev-slide-btn"
